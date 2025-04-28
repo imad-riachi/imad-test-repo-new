@@ -1,0 +1,75 @@
+name: Deploy to Production (Vercel)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        node-version: [20]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10 # Specify pnpm version or remove for latest
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
+
+      # No need for the duplicate checkout or node setup steps here
+      # No need to install pnpm globally via npm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Ensure necessary environment variables are available for migration if needed
+      - name: Run database migrations
+        run: pnpm run db:migrate
+        env:
+         POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+
+      # Link project with Vercel CLI to download settings
+      - name: Link Vercel Project
+        run: npx vercel pull --yes --environment=production --token $VERCEL_TOKEN
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      # Build the project using Vercel CLI
+      - name: Build project
+        run: npx vercel build --prod --token $VERCEL_TOKEN
+        env:
+         # Ensure all build-time secrets are here
+         POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+         STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+         STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+         AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+         BASE_URL: ${{ secrets.BASE_URL }}
+         # Vercel secrets needed for build command context
+         VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+         VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+         VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+
+      # Deploy the prebuilt output
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        # Deploy the output from the .vercel/output directory
+        run: npx vercel deploy --prebuilt --prod --token $VERCEL_TOKEN --scope $VERCEL_ORG_ID
